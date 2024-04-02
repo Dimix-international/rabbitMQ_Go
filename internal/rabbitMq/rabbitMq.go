@@ -3,6 +3,7 @@ package rabbitMq
 import (
 	"context"
 	"fmt"
+	"log"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -20,6 +21,11 @@ func NewRabbitClient(username, password, host, vhost string) (*RabbitClient, err
 
 	channel, err := connect.Channel()
 	if err != nil {
+		return nil, err
+	}
+
+	if err := channel.Confirm(false); err != nil {
+		//Подтверждение переводит этот канал в режим подтверждения, чтобы клиент мог убедиться, что все публикации успешно получены сервером.
 		return nil, err
 	}
 
@@ -41,7 +47,27 @@ func (r *RabbitClient) CreateBinding(queueName string, bindingKey, exchangeName 
 // Send is used to publish payloads into an echange with the given routing key
 func (r *RabbitClient) Send(ctx context.Context, exchangeName string, routingKey string, options amqp.Publishing) error {
 	//mandatory  - is used to determine if an error should be returned upon failure
-	return r.ch.PublishWithContext(ctx, exchangeName, routingKey, true, false, options)
+	//immediate - false - is deprecated
+	//return r.ch.PublishWithContext(ctx, exchangeName, routingKey, true, false, options)
+
+	//нужно для канала установить confirm mode - channel.Confirm(false)
+	//позволяя вызывающей стороне дождаться подтверждения этого сообщения от издателя - статут отправки
+	confirmation, err := r.ch.PublishWithDeferredConfirmWithContext(ctx, exchangeName, routingKey, true, false, options)
+	if err != nil {
+		return err
+	}
+
+	log.Println(confirmation.Wait()) //Блоки ожидания до получения подтверждения от издателя. Возвращает значение true, если сервер успешно получил публикацию
+	return nil
+}
+
+// Consume is used to consume a queue
+func (r *RabbitClient) Consume(queueName, consumer string, autoAck bool) (<-chan amqp.Delivery, error) {
+	//autoAck - отвечать на ACK автоматически, true - да, ACK ответить означает, что я получил сообщение от высокоскоростного сервера
+	//exclusive - текущая очередь может использоваться только одним потребителем
+	//noLocal - true - производитель и потребитель не могут быть одним и тем же соединением
+	//nowait - true  - после отправки запроса на создание коммутатора он блокируется до тех пор, пока сервер RMQ не вернет информацию
+	return r.ch.Consume(queueName, consumer, autoAck, false, false, false, amqp.Table{})
 }
 
 func (r *RabbitClient) Close() {
