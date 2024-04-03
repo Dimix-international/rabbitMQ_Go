@@ -32,10 +32,18 @@ func NewRabbitClient(username, password, host, vhost string) (*RabbitClient, err
 	return &RabbitClient{conn: connect, ch: channel}, nil
 }
 
-// CreateQueue will create a new queue based on given cfgs
+// CreateQueue will create a new queue based on given cfgs - exchange topic
 func (r *RabbitClient) CreateQueue(queueName string, durable, autodelete bool) error {
 	_, err := r.ch.QueueDeclare(queueName, durable, autodelete, false, false, amqp.Table{})
 	return err
+}
+
+func (r *RabbitClient) CreateQueueWithReturnQueue(queueName string, durable, autodelete bool) (amqp.Queue, error) {
+	q, err := r.ch.QueueDeclare(queueName, durable, autodelete, false, false, amqp.Table{})
+	if err != nil {
+		return amqp.Queue{}, nil
+	}
+	return q, nil
 }
 
 // CreateBinding will bind the current channel to the given exchange using the routing key provided
@@ -68,6 +76,17 @@ func (r *RabbitClient) Consume(queueName, consumer string, autoAck bool) (<-chan
 	//noLocal - true - производитель и потребитель не могут быть одним и тем же соединением
 	//nowait - true  - после отправки запроса на создание коммутатора он блокируется до тех пор, пока сервер RMQ не вернет информацию
 	return r.ch.Consume(queueName, consumer, autoAck, false, false, false, amqp.Table{})
+}
+
+// ApplyQos - Qos определяет, сколько сообщений или сколько байт сервер попытается сохранить в сети для пользователей, прежде чем получит подтверждение о доставке.
+//
+//	Цель Qos - обеспечить заполнение сетевых буферов между сервером и клиентом
+//
+// prefetch count - an integer on how many uncknowledge messages the server can send
+// prefetch size - is int how many bytes
+// global - determines of the rule should be applied globally or not
+func (r *RabbitClient) ApplyQos(count, size int, global bool) error {
+	return r.ch.Qos(count, size, global)
 }
 
 func (r *RabbitClient) Close() {
